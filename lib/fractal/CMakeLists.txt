@@ -1,30 +1,39 @@
 project(FractalLib)
 
-set(FRACTAL_HEADERS ${CORE_HEADERS} ${RENDERER_HEADERS}
-                    ${UTILITY_HEADERS})
-set(FRACTAL_SRC ${CORE_SRC} ${RENDERER_SRC} ${UTILITY_SRC})
+include(core/CMakeLists.txt)
+include(renderer/CMakeLists.txt)
+include(utility/CMakeLists.txt)
 
-add_library(FractalLib)
-target_sources(FractalLib
+add_library(FractalLib STATIC)
+target_sources(FractalLib 
     PRIVATE # SRC FILES
-        ${FRACTAL_SRC} 
+        ${CORE_SRC}
+        ${RENDERER_SRC}
+        ${UTILITY_SRC}
 
-    PRIVATE
+    PRIVATE # HEADER FILES
         FILE_SET internalHeaders
-        TYPE HEADERS
+        TYPE HEADERS#
         BASE_DIRS
             core
             renderer
             utility
         FILES
-            ${FRACTAL_HEADERS}
-
-    INTERFACE
-        FILE_SET consumerHeaders
-        TYPE HEADERS
-        FILES
-            Fractal.H
+            core/FTL_Application.h 
+            core/FTL_Window.h 
+            renderer/FTL_Renderer.h 
+            renderer/FTL_VulkanCore.h 
+            utility/FTL_Types.h
+            utility/FTL_pch.h
 
     PUBLIC
-        Fractal.cpp
+        FILE_SET consumerHeaders
+        TYPE HEADERS
+        BASE_DIRS
+            ${PROJECT_SOURCE_DIR}
+        FILES
+            Fractal.h
 )
+
+
+target_link_libraries(FractalLib ${Vulkan_LIBRARIES} glfw)
