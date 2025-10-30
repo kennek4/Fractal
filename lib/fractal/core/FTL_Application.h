@@ -1,7 +1,21 @@
 #pragma once
 
-#include <print>
+#include "FTL_Window.h"
+#include <renderer/FTL_Renderer.h>
+#include <utility/FTL_pch.h>
 
 namespace FTL {
-  inline void HelloWorld() { std::println("Hello, World!"); };
+
+class Application {
+  private:
+    Window mWindow;
+    Renderer mRenderer;
+
+  public:
+    Application();
+    ~Application();
+
+    void run();
+};
+
 }; // namespace FTL
