@@ -1,8 +1,24 @@
 #include "FTL_Renderer.h"
-#include "FTL_Window.h"
 #include "gtfo_profiler.h"
-#include <algorithm>
-#include <vector>
+
+namespace {
+
+std::vector<const char *>
+getRequiredExtensions(const bool hasValidationLayerSupport) {
+    uint32_t glfwExtensionCount = 0;
+    const char **glfwExtensions =
+        glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+    std::vector extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+    if (hasValidationLayerSupport) {
+        extensions.push_back(vk::EXTDebugUtilsExtensionName);
+    }
+
+    return extensions;
+};
+
+}; // namespace
+
 namespace FTL {
 Renderer::Renderer() {
 
@@ -59,25 +75,53 @@ void Renderer::createInstance(WindowData *pWinData) {
     };
 
     uint32_t glfwExtensionCount = 0;
-    const char **glfwExtensions =
-        glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+    const char **glfwExtensions = nullptr;
+    {
+        GTFO_PROFILE_SCOPE("Getting GLFW Required Extensions", "scope");
+        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+    }
+
+    std::vector<const char *> requiredExtensions;
+    {
+        GTFO_PROFILE_SCOPE("Getting Required Extensions", "scope");
+        requiredExtensions = getRequiredExtensions(hasValidationLayerSupport);
+    }
 
     auto extensionProperties =
         mVKCore.context.enumerateInstanceExtensionProperties();
 
-    for (uint32_t i = 0; i < glfwExtensionCount; i++) {
-        auto predicate =
-            [glfwExtension = glfwExtensions[i]](auto const &extensionProperty) {
+    {
+        GTFO_PROFILE_SCOPE("Required Extensions Check", "scope");
+        for (auto const &requiredExtension : requiredExtensions) {
+            auto predicate =
+                [requiredExtension](auto const &extensionProperty) {
+                    return strcmp(extensionProperty.extensionName,
+                                  requiredExtension) == 0;
+                };
+
+            if (std::ranges::none_of(extensionProperties, predicate)) {
+                throw std::runtime_error("Required extension not supported: " +
+                                         std::string(requiredExtension));
+            }
+        };
+    }
+
+    {
+        GTFO_PROFILE_SCOPE("Required GLFW Extensions Check", "scope");
+        for (uint32_t i = 0; i < glfwExtensionCount; i++) {
+            auto predicate = [glfwExtension = glfwExtensions[i]](
+                                 auto const &extensionProperty) {
                 return strcmp(extensionProperty.extensionName, glfwExtension);
             };
 
-        if (std::ranges::none_of(extensionProperties, predicate)) {
-            throw std::runtime_error(
-                "[Fractal/Renderer] GLFW requires the following"
-                "extension but it is not supported: " +
-                std::string(glfwExtensions[i]));
+            if (std::ranges::none_of(extensionProperties, predicate)) {
+                throw std::runtime_error(
+                    "[Fractal/Renderer] GLFW requires the following"
+                    "extension but it is not supported: " +
+                    std::string(glfwExtensions[i]));
+            };
         };
-    };
+    }
 
     const vk::InstanceCreateInfo createInfo {
         .pApplicationInfo        = &appInfo,
@@ -87,14 +131,10 @@ void Renderer::createInstance(WindowData *pWinData) {
         .ppEnabledExtensionNames = glfwExtensions,
     };
 
-    auto extensions = mVKCore.context.enumerateInstanceExtensionProperties();
-
-    std::println("Available Extensions:\n");
-    for (const auto &extension : extensions) {
-        std::println("\t{}", std::string_view(extension.extensionName));
-    };
-
-    mVKCore.instance = vk::raii::Instance(mVKCore.context, createInfo);
+    {
+        GTFO_PROFILE_SCOPE("vk::raii::Instance Call", "init");
+        mVKCore.instance = vk::raii::Instance(mVKCore.context, createInfo);
+    }
 };
 
 void Renderer::shutdown(GLFWwindow **ppWindow) {
