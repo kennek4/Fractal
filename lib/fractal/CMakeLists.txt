@@ -4,6 +4,15 @@ include(core/CMakeLists.txt)
 include(renderer/CMakeLists.txt)
 include(utility/CMakeLists.txt)
 
+add_library(VulkanCppModule INTERFACE)
+add_library(Vulkan::cppm ALIAS VulkanCppModule)
+target_link_libraries(VulkanCppModule INTERFACE Vulkan::Vulkan)
+target_compile_definitions(VulkanCppModule
+    INTERFACE VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
+)
+
+set_target_properties(VulkanCppModule PROPERTIES CXX_STANDARD 23)
+
 add_library(FractalLib STATIC)
 target_sources(FractalLib 
     PRIVATE # SRC FILES
@@ -22,7 +31,7 @@ target_sources(FractalLib
             core/FTL_Application.h 
             core/FTL_Window.h 
             renderer/FTL_Renderer.h 
-            renderer/FTL_VulkanCore.h 
+            utility/FTL_Log.h
             utility/FTL_Types.h
             utility/FTL_pch.h
 
@@ -35,5 +44,7 @@ target_sources(FractalLib
             Fractal.h
 )
 
+target_precompile_headers(FractalLib PRIVATE utility/FTL_pch.h)
 
-target_link_libraries(FractalLib ${Vulkan_LIBRARIES} glfw)
+message(STATUS "[Fractal]: Using DEBUG Libraries!")
+target_link_libraries(FractalLib VulkanCppModule glfw GTFOProfiler spdlog::spdlog)
