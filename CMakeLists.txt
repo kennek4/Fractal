@@ -34,11 +34,23 @@ if (NOT TARGET glm)
     )
 endif()
 
+
+
 # BUILD TYPE
 message(STATUS "[Fractal] CMake Generator: ${CMAKE_GENERATOR}")
 if (CMAKE_BUILD_TYPE STREQUAL Debug)
     message(STATUS "[Fractal]: Building Debug...")
     add_compile_definitions(__FRACTAL_BUILD_DEBUG)
+
+    find_package(spdlog REQUIRED)
+    if (NOT TARGET spdlog) 
+        message("[Fractal] Using FetchContent for spdlog.")
+        FetchContent_Declare(
+            GIT_REPOSITORY https://github.com/gabime/spdlog.git
+            GIT_TAG v1.16.0
+        )
+    endif()
+
 else()
     message(STATUS "[Fractal]: Building Release...")
     add_compile_definitions(__FRACTAL_BUILD_RELEASE)
@@ -57,6 +69,6 @@ else()
 endif()
 
 # DIRECTORIES ##############
-add_subdirectory(include)
+add_subdirectory(include/gtfoprofiler)
 add_subdirectory(lib/fractal)
 add_subdirectory(src)

@@ -23,15 +23,7 @@ out/
 build/
 .vscode/
 .clangd
-*.log
-logs/
 
 # Documentation
 docs/html/
 docs/latex/
-
-# perf & flamegraph
-out.perf
-out.folded
-perf.out
-perf.data

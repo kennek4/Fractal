@@ -1,7 +1,18 @@
 ---
 BasedOnStyle: LLVM
+AlignArrayOfStructures: Right
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: true
+  AlignCompound: true
+  AlignFunctionPointers: true
+AlignConsecutiveDeclarations:
+  AcrossEmptyLines: true
+  AlignCompound: true
+  AlignFunctionPointers: true
+AlignConsecutiveTableGenDefinitionColons:
+  Enabled: true
+  AlignFunctionPointers: true
 IndentWidth: 4
+SpaceBeforeCpp11BracedList: true
 TabWidth: 4
-AccessModifierOffset: -2
-AlignAfterOpenBracket: Align
-AlignArrayOfStructures: Left
