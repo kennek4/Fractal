@@ -23,6 +23,8 @@ out/
 build/
 .vscode/
 .clangd
+*.log
+logs/
 
 # Documentation
 docs/html/
