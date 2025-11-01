@@ -5,15 +5,15 @@
 int main(int argc, char *argv[]) {
     FTL::Application *app = new FTL::Application();
 
-    GTFO_PROFILE_SESSION_START("AppInit", "logs/FTLAppInit.log");
+    GTFO_PROFILE_SESSION_START("AppInit", "logs/FTLAppInit.json");
     app->init();
     GTFO_PROFILE_SESSION_END();
 
-    GTFO_PROFILE_SESSION_START("AppRun", "logs/FTLAppRun.log");
+    GTFO_PROFILE_SESSION_START("AppRun", "logs/FTLAppRun.json");
     app->run();
     GTFO_PROFILE_SESSION_END();
 
-    GTFO_PROFILE_SESSION_START("AppShutdown", "logs/FTLAppShutdown.log");
+    GTFO_PROFILE_SESSION_START("AppShutdown", "logs/FTLAppShutdown.json");
     delete app;
     GTFO_PROFILE_SESSION_END();
 
