@@ -2,28 +2,36 @@
 
 namespace FTL {
 
-std::shared_ptr<spdlog::logger> Log::sCoreLogger;
-std::shared_ptr<spdlog::logger> Log::sClientLogger;
+std::shared_ptr<spdlog::logger> Log::sErrLogger;
+std::shared_ptr<spdlog::logger> Log::sStdLogger;
 
 void Log::init() {
-    std::vector<spdlog::sink_ptr> logSinks;
-    logSinks.emplace_back(
-        std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+    const std::vector<spdlog::sink_ptr> sinks {
+        std::make_shared<spdlog::sinks::stdout_color_sink_mt>(),
+        std::make_shared<spdlog::sinks::stderr_color_sink_mt>(),
+        std::make_shared<spdlog::sinks::basic_file_sink_mt>("logs/Fractal.log",
+                                                            true)};
 
-    logSinks.emplace_back(std::make_shared<spdlog::sinks::basic_file_sink_mt>(
-        "logs/Fractal.log", true));
+    const auto &stdSink  = sinks[0];
+    const auto &errSink  = sinks[1];
+    const auto &fileSink = sinks[2];
 
-    logSinks[0]->set_pattern("%^[%D] [%T.%f] [%n]: %v%$");
-    sCoreLogger = std::make_shared<spdlog::logger>(
-        "Fractal::Core", begin(logSinks), end(logSinks));
-    sCoreLogger->set_level(spdlog::level::trace);
-    sCoreLogger->flush_on(spdlog::level::trace);
+    stdSink->set_pattern("[%D] [%T.%f] %^[%n] %v%$");
+    stdSink->set_level(spdlog::level::info);
 
-    logSinks[1]->set_pattern("[%D] [%T.%f] [%l] [%n]: %v");
-    sClientLogger = std::make_shared<spdlog::logger>(
-        "Fractal::Application", begin(logSinks), end(logSinks));
-    spdlog::register_logger(sClientLogger);
-    sClientLogger->set_level(spdlog::level::trace);
-    sClientLogger->flush_on(spdlog::level::trace);
+    errSink->set_pattern("[%D] [%T.%f] %^[%n] [%s:%#] %v%$");
+    errSink->set_level(spdlog::level::err);
+
+    fileSink->set_pattern("[%D] [%T.%f] [%n] [%l] %v");
+    fileSink->set_level(spdlog::level::trace);
+
+    sErrLogger = std::make_shared<spdlog::logger>("FTL::Core", errSink);
+    sErrLogger->set_level(spdlog::level::err);
+    sErrLogger->flush_on(spdlog::level::err);
+
+    sStdLogger =
+        std::make_shared<spdlog::logger>("FTL::Core", begin(sinks), end(sinks));
+    sStdLogger->set_level(spdlog::level::trace);
+    sStdLogger->flush_on(spdlog::level::trace);
 };
 }; // namespace FTL
