@@ -1,36 +1,24 @@
 #pragma once
 
-#include "FTL_VulkanCore.h"
-#include <core/FTL_System.h>
+#include <core/FTL_Window.h>
 #include <utility/FTL_pch.h>
 
 namespace FTL {
 
 struct VulkanCore {
-    VkInstance instance;
-    VkDebugUtilsMessengerEXT debugMessenger;
+    vk::raii::Context context;
+    vk::raii::Instance instance {nullptr};
 };
 
-class Renderer : public System {
+class Renderer {
   private:
-    VulkanCore mVkCore;
-
-    void
-    DestroyDebugUtilsMessengerEXT(VkInstance instance,
-                                  VkDebugUtilsMessengerEXT debugMessenger,
-                                  const VkAllocationCallbacks *pAllocator) {
-        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-            instance, "vkDestroyDebugUtilsMessengerEXT");
-        if (func) {
-            return func(instance, debugMessenger, pAllocator);
-        };
-    };
+    VulkanCore mVKCore;
 
   public:
     Renderer();
     ~Renderer();
 
-    virtual bool init() override;
-    virtual bool shutdown() override;
+    void shutdown(GLFWwindow **ppWindow);
+    void createInstance(WindowData *pWinData);
 };
 }; // namespace FTL
