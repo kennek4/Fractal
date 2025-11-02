@@ -13,7 +13,7 @@ void Application::init() {
     Log::init();
 
     FTL_DEBUG("Calling Renderer::createInstance()...");
-    mRenderer->createInstance(&mWindowData);
+    mRenderer->init(&mWindowData);
 };
 
 void Application::run() {
