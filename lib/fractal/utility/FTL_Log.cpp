@@ -17,7 +17,7 @@ void Log::init() {
     const auto &fileSink = sinks[2];
 
     stdSink->set_pattern("[%D] [%T.%f] %^[%n] %v%$");
-    stdSink->set_level(spdlog::level::info);
+    stdSink->set_level(spdlog::level::trace);
 
     errSink->set_pattern("[%D] [%T.%f] %^[%n] [%s:%#] %v%$");
     errSink->set_level(spdlog::level::err);

@@ -9,13 +9,14 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
-#include <print>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 // GLFW
+#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
+#include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
 #define GLFW_INCLUDE_VULKAN
