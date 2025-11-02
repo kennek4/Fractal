@@ -11,7 +11,7 @@ target_compile_definitions(VulkanCppModule
     INTERFACE VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
 )
 
-set_target_properties(VulkanCppModule PROPERTIES CXX_STANDARD 23)
+set_target_properties(VulkanCppModule PROPERTIES CXX_STANDARD 20)
 
 add_library(FractalLib STATIC)
 target_sources(FractalLib 
