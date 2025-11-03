@@ -1,5 +1,14 @@
 #include "FTL_Renderer.h"
 #include "FTL_Log.h"
+#include "vulkan/vulkan.hpp"
+#include <GLFW/glfw3.h>
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <spdlog/common.h>
+#include <stdexcept>
+#include <vector>
+#include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_hpp_macros.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
@@ -32,6 +41,48 @@ uint32_t getQueueFamilyIndex(vk::PhysicalDevice physicalDevice) {
 
     return static_cast<uint32_t>(
         std::distance(qfps.begin(), graphicsQueueFamilyProperty));
+};
+
+vk::SurfaceFormatKHR getSwapChainSurfaceFormat(
+    const std::vector<vk::SurfaceFormatKHR> &availableFormats) {
+    for (const vk::SurfaceFormatKHR &format : availableFormats) {
+        if (format.format == vk::Format::eB8G8R8A8Srgb &&
+            format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+            return format;
+        };
+    };
+
+    return availableFormats[0];
+};
+
+vk::PresentModeKHR
+getSwapChainPresentMode(const std::vector<vk::PresentModeKHR> &availableModes) {
+    for (const vk::PresentModeKHR mode : availableModes) {
+        if (mode == vk::PresentModeKHR::eMailbox) {
+            return mode;
+        };
+    };
+
+    return vk::PresentModeKHR::eFifo;
+};
+
+vk::Extent2D getSwapChainExtent(const vk::SurfaceCapabilitiesKHR &capabilities,
+                                GLFWwindow *pWindow) {
+    if (capabilities.currentExtent.width !=
+        std::numeric_limits<uint32_t>::max()) {
+        return capabilities.currentExtent;
+    };
+
+    int width, height;
+    glfwGetFramebufferSize(pWindow, &width, &height);
+
+    return {
+        .width = std::clamp<uint32_t>(width, capabilities.minImageExtent.width,
+                                      capabilities.maxImageExtent.width),
+        .height =
+            std::clamp<uint32_t>(height, capabilities.minImageExtent.height,
+                                 capabilities.maxImageExtent.height),
+    };
 };
 
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL vkDebugCallback(
@@ -187,6 +238,19 @@ void Renderer::setupDebugMessenger() {
     mDebugMessenger = mInstance.createDebugUtilsMessengerEXT(createInfo);
 };
 
+void Renderer::createSurface(GLFWwindow *pWindow) {
+    VkSurfaceKHR _surface;
+    if (glfwCreateWindowSurface(*mInstance, pWindow, nullptr, &_surface) !=
+        VK_SUCCESS) {
+        constexpr const char *errMsg = "Failed to create a Vulkan Surface";
+        FTL_CRITICAL(errMsg);
+        throw std::runtime_error(errMsg);
+    }
+
+    mSurface = vk::raii::SurfaceKHR(mInstance, _surface);
+    FTL_DEBUG("Successfully created a Vulkan Surface! ");
+};
+
 void Renderer::pickPhysicalDevice() {
     std::vector<vk::raii::PhysicalDevice> devices =
         mInstance.enumeratePhysicalDevices();
@@ -255,6 +319,48 @@ void Renderer::createLogicalDevice() {
     uint32_t graphicsIndex = static_cast<uint32_t>(std::distance(
         queueFamilyProperties.begin(), graphicsQueueFamilyProperty));
 
+    uint32_t presentIndex =
+        mPhysicalDevice.getSurfaceSupportKHR(graphicsIndex, mSurface)
+            ? graphicsIndex
+            : static_cast<uint32_t>(queueFamilyProperties.size());
+
+    if (presentIndex == queueFamilyProperties.size()) {
+        FTL_DEBUG("Finding Present Queue Index...");
+        bool hasGraphicsSupport = true;
+        bool hasPresentSupport  = true;
+
+        for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
+            hasGraphicsSupport =
+                static_cast<bool>(queueFamilyProperties[i].queueFlags &
+                                  vk::QueueFlagBits::eGraphics);
+            hasGraphicsSupport = mPhysicalDevice.getSurfaceSupportKHR(
+                static_cast<uint32_t>(i), mSurface);
+
+            if (hasGraphicsSupport && hasPresentSupport) {
+                graphicsIndex = static_cast<uint32_t>(i);
+                presentIndex  = graphicsIndex;
+                FTL_DEBUG("Graphics Queue and Present Queue have the same "
+                          "indicies: {}, {}  respectively",
+                          graphicsIndex, presentIndex);
+                break;
+            } else if (!hasGraphicsSupport && hasPresentSupport) {
+                presentIndex = static_cast<uint32_t>(i);
+                FTL_DEBUG("Graphics Queue and Present Queue have different "
+                          "indicies: {}, {}  respectively",
+                          graphicsIndex, presentIndex);
+                break;
+            }
+        };
+
+        if (graphicsIndex == queueFamilyProperties.size() ||
+            presentIndex == queueFamilyProperties.size()) {
+            constexpr const char *errMsg = "No valid Vulkan Queue was found "
+                                           "that supports graphics or present!";
+            FTL_CRITICAL(errMsg);
+            throw std::runtime_error(errMsg);
+        };
+    };
+
     vk::StructureChain<vk::PhysicalDeviceFeatures2,
                        vk::PhysicalDeviceVulkan13Features,
                        vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>
@@ -266,7 +372,7 @@ void Renderer::createLogicalDevice() {
                  true} // Enable extended dynamic state from the extension
         };
 
-    float queuePriority = 1.0f;
+    float queuePriority = 0.0f;
     vk::DeviceQueueCreateInfo deviceQueueCreateInfo {
         .queueFamilyIndex = graphicsIndex,
         .queueCount       = 1,
@@ -284,8 +390,66 @@ void Renderer::createLogicalDevice() {
     mDevice = vk::raii::Device(mPhysicalDevice, deviceCreateInfo);
     FTL_DEBUG("Created the Vulkan Logical Device!");
 
-    mQueue = vk::raii::Queue(mDevice, graphicsIndex, 0);
+    mGraphicsQueue = vk::raii::Queue(mDevice, graphicsIndex, 0);
     FTL_DEBUG("Created the Vulkan Graphics Queue!");
+
+    mPresentQueue = vk::raii::Queue(mDevice, presentIndex, 0);
+    FTL_DEBUG("Created the Vulkan Present Queue!");
+};
+
+void Renderer::createSwapChain(GLFWwindow *pWindow) {
+    vk::SurfaceCapabilitiesKHR surfaceCapabilites =
+        mPhysicalDevice.getSurfaceCapabilitiesKHR(mSurface);
+
+    vk::SurfaceFormatKHR surfaceFormat = getSwapChainSurfaceFormat(
+        mPhysicalDevice.getSurfaceFormatsKHR(mSurface));
+
+    mSwapChainFormat       = surfaceFormat.format;
+    mSwapChainExtent       = getSwapChainExtent(surfaceCapabilites, pWindow);
+
+    uint32_t minImageCount = std::max(3u, surfaceCapabilites.minImageCount);
+    if (surfaceCapabilites.maxImageCount > 0 &&
+        minImageCount > surfaceCapabilites.minImageCount) {
+        minImageCount = surfaceCapabilites.maxImageCount;
+    };
+
+    vk::SwapchainCreateInfoKHR createInfo {
+        .flags            = vk::SwapchainCreateFlagsKHR(),
+        .surface          = mSurface,
+        .minImageCount    = minImageCount,
+        .imageFormat      = surfaceFormat.format,
+        .imageColorSpace  = surfaceFormat.colorSpace,
+        .imageExtent      = mSwapChainExtent,
+        .imageArrayLayers = 1,
+        .imageUsage       = vk::ImageUsageFlagBits::eColorAttachment,
+        .imageSharingMode = vk::SharingMode::eExclusive,
+        .preTransform     = surfaceCapabilites.currentTransform,
+        .compositeAlpha   = vk::CompositeAlphaFlagBitsKHR::eOpaque,
+        .presentMode      = getSwapChainPresentMode(
+            mPhysicalDevice.getSurfacePresentModesKHR(mSurface)),
+        .clipped      = true,
+        .oldSwapchain = VK_NULL_HANDLE};
+
+    mSwapChain       = vk::raii::SwapchainKHR(mDevice, createInfo);
+    mSwapChainImages = mSwapChain.getImages();
+    FTL_DEBUG("Vulkan Swap Chain created successfully!");
+};
+
+void Renderer::createImageViews() {
+    mSwapChainImageViews.clear();
+
+    vk::ImageViewCreateInfo createInfo {
+        .viewType         = vk::ImageViewType::e2D,
+        .format           = mSwapChainFormat,
+        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
+
+    for (vk::Image image : mSwapChainImages) {
+        createInfo.image = image;
+        mSwapChainImageViews.emplace_back(mDevice, createInfo);
+    }
+
+    FTL_DEBUG("Vulkan Image Views created successfully!");
 };
 
 void Renderer::shutdown(GLFWwindow **ppWindow) {
