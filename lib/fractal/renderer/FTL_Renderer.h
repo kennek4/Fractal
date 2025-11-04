@@ -1,11 +1,8 @@
 #pragma once
 
-#include "vulkan/vulkan.hpp"
 #include <core/FTL_Window.h>
 #include <utility/FTL_Log.h>
 #include <utility/FTL_pch.h>
-#include <vector>
-#include <vulkan/vulkan_raii.hpp>
 
 namespace FTL {
 
@@ -28,6 +25,9 @@ class Renderer {
     std::vector<vk::Image> mSwapChainImages {};
     std::vector<vk::raii::ImageView> mSwapChainImageViews {};
 
+    vk::raii::PipelineLayout mPipelineLayout {nullptr};
+    vk::raii::Pipeline mGraphicsPipeline {nullptr};
+
   public:
     Renderer();
     ~Renderer();
@@ -41,6 +41,7 @@ class Renderer {
         createLogicalDevice();
         createSwapChain(pWinData->window);
         createImageViews();
+        createGraphicsPipeline();
     };
 
     void createInstance(WindowData *pWinData);
@@ -50,5 +51,6 @@ class Renderer {
     void createLogicalDevice();
     void createSwapChain(GLFWwindow *pWindow);
     void createImageViews();
+    void createGraphicsPipeline();
 };
 }; // namespace FTL

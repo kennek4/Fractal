@@ -1,20 +1,29 @@
 #include "FTL_Renderer.h"
 #include "FTL_Log.h"
 #include "vulkan/vulkan.hpp"
-#include <GLFW/glfw3.h>
-#include <algorithm>
 #include <cstdint>
-#include <limits>
-#include <spdlog/common.h>
-#include <stdexcept>
-#include <vector>
 #include <vulkan/vulkan_core.h>
-#include <vulkan/vulkan_hpp_macros.hpp>
-#include <vulkan/vulkan_raii.hpp>
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 namespace {
+static std::vector<char> readFile(const std::string &fileName) {
+    std::ifstream file(fileName, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open()) {
+        constexpr const char *errMsg = "Failed to open file!";
+        FTL_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
+    };
+
+    std::vector<char> buffer(file.tellg());
+    file.seekg(0, std::ios::beg);
+    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    file.close();
+
+    return buffer;
+};
+
 std::vector<const char *>
 getRequiredExtensions(const bool hasValidationLayerSupport) {
     uint32_t glfwExtensionCount = 0;
@@ -450,6 +459,106 @@ void Renderer::createImageViews() {
     }
 
     FTL_DEBUG("Vulkan Image Views created successfully!");
+};
+
+void Renderer::createGraphicsPipeline() {
+    std::string shaderPath       = std::string(std::filesystem::current_path());
+    shaderPath                   = shaderPath + "/assets/shaders/slang.spv";
+
+    std::vector<char> shaderCode = readFile(shaderPath);
+    vk::ShaderModuleCreateInfo shaderCreateInfo {
+        .codeSize = shaderCode.size() * sizeof(char),
+        .pCode    = reinterpret_cast<const uint32_t *>(shaderCode.data())};
+
+    vk::raii::ShaderModule shaderModule {mDevice, shaderCreateInfo};
+
+    vk::PipelineShaderStageCreateInfo vertShaderCreateInfo {
+        .stage  = vk::ShaderStageFlagBits::eVertex,
+        .module = shaderModule,
+        .pName  = "vertMain"};
+
+    vk::PipelineShaderStageCreateInfo fragShaderCreateInfo {
+        .stage  = vk::ShaderStageFlagBits::eFragment,
+        .module = shaderModule,
+        .pName  = "fragMain"};
+
+    vk::PipelineShaderStageCreateInfo shaderStages[] {vertShaderCreateInfo,
+                                                      fragShaderCreateInfo};
+
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+
+    vk::PipelineInputAssemblyStateCreateInfo inputAssembly {
+        .topology = vk::PrimitiveTopology::eTriangleList};
+
+    vk::PipelineViewportStateCreateInfo viewportState {.viewportCount = 1,
+                                                       .scissorCount  = 1};
+
+    vk::PipelineRasterizationStateCreateInfo rasterizer {
+        .depthClampEnable        = vk::False,
+        .rasterizerDiscardEnable = vk::False,
+        .polygonMode             = vk::PolygonMode::eFill,
+        .cullMode                = vk::CullModeFlagBits::eBack,
+        .frontFace               = vk::FrontFace::eClockwise,
+        .depthBiasEnable         = vk::False,
+        .depthBiasSlopeFactor    = 1.0f,
+        .lineWidth               = 1.0f};
+
+    vk::PipelineMultisampleStateCreateInfo multisampling {
+        .rasterizationSamples = vk::SampleCountFlagBits::e1,
+        .sampleShadingEnable  = vk::False};
+
+    vk::PipelineColorBlendAttachmentState colorBlendAttachment;
+    colorBlendAttachment.colorWriteMask =
+        vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+        vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+    colorBlendAttachment.blendEnable = vk::False;
+
+    vk::PipelineColorBlendStateCreateInfo colorBlending {
+        .logicOpEnable   = vk::False, //
+        .logicOp         = vk::LogicOp::eCopy,
+        .attachmentCount = 1,
+        .pAttachments    = &colorBlendAttachment};
+
+    std::vector<vk::DynamicState> dynamicStates {
+        vk::DynamicState::eViewport,
+        vk::DynamicState::eScissor,
+    };
+
+    vk::PipelineDynamicStateCreateInfo dynamicStateCreateInfo {
+        .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+        .pDynamicStates    = dynamicStates.data()};
+
+    vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo {
+        .setLayoutCount = 0, .pushConstantRangeCount = 0};
+
+    mPipelineLayout =
+        vk::raii::PipelineLayout(mDevice, pipelineLayoutCreateInfo);
+
+    vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo {
+        .colorAttachmentCount    = 1,
+        .pColorAttachmentFormats = &mSwapChainFormat};
+
+    vk::GraphicsPipelineCreateInfo pipelineCreateInfo {
+        .pNext               = &pipelineRenderingCreateInfo,
+        .stageCount          = 2,
+        .pStages             = shaderStages,
+        .pVertexInputState   = &vertexInputInfo,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState      = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState   = &multisampling,
+        .pColorBlendState    = &colorBlending,
+        .pDynamicState       = &dynamicStateCreateInfo,
+        .layout              = mPipelineLayout,
+        .renderPass          = nullptr};
+
+    pipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+    pipelineCreateInfo.basePipelineIndex  = -1;
+
+    mGraphicsPipeline =
+        vk::raii::Pipeline(mDevice, nullptr, pipelineCreateInfo);
+
+    FTL_DEBUG("Vulkan Graphics Pipeline Successfully Created!");
 };
 
 void Renderer::shutdown(GLFWwindow **ppWindow) {
