@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FTL_Window.h"
+#include <memory>
 #include <renderer/FTL_Renderer.h>
 #include <utility/FTL_pch.h>
 

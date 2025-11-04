@@ -53,7 +53,6 @@ target_sources(FractalLib
             core/FTL_Application.h 
             core/FTL_Window.h 
             renderer/FTL_Renderer.h 
-            utility/FTL_Constants.h
             utility/FTL_Log.h
             utility/FTL_Types.h
             utility/FTL_pch.h
