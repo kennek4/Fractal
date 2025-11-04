@@ -34,8 +34,6 @@ if (NOT TARGET glm)
     )
 endif()
 
-
-
 # BUILD TYPE
 message(STATUS "[Fractal] CMake Generator: ${CMAKE_GENERATOR}")
 if (CMAKE_BUILD_TYPE STREQUAL Debug)

@@ -25,6 +25,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+// GLM
+#include <glm/glm.hpp>
+
 // SPDLOG
 #include <fmt/base.h>
 #include <spdlog/common.h>

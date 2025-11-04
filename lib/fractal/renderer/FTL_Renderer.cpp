@@ -1,6 +1,11 @@
 #include "FTL_Renderer.h"
 #include "FTL_Log.h"
-#include "gtfo_profiler.h"
+#include "FTL_Vertex.h"
+#include "vulkan/vulkan.hpp"
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
+#include <vulkan/vulkan_raii.hpp>
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -92,6 +97,28 @@ vk::Extent2D getSwapChainExtent(const vk::SurfaceCapabilitiesKHR &capabilities,
     };
 };
 
+uint32_t findMemoryType(const vk::raii::PhysicalDevice &physicalDevice,
+                        uint32_t typeFilter,
+                        vk::MemoryPropertyFlags properties) {
+    vk::PhysicalDeviceMemoryProperties memoryProperties =
+        physicalDevice.getMemoryProperties();
+
+    bool hasValidType;
+    bool hasValidProperties;
+    for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
+        hasValidType       = typeFilter & (1 << i);
+        hasValidProperties = (memoryProperties.memoryTypes[i].propertyFlags &
+                              properties) == properties;
+
+        if (hasValidType && hasValidProperties)
+            return i;
+    };
+
+    FTL_CRITICAL(
+        "Failed to find valid memory type for vertex buffer allocation!");
+    throw std::runtime_error("Failed to find valid memory type!");
+};
+
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL vkDebugCallback(
     vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
     vk::DebugUtilsMessageTypeFlagsEXT type,
@@ -120,6 +147,12 @@ const std::vector<const char *> RequiredDeviceExtensions {
     vk::KHRSpirv14ExtensionName,
     vk::KHRSynchronization2ExtensionName,
     vk::KHRCreateRenderpass2ExtensionName,
+};
+
+const std::vector<Vertex> vertices = {
+    {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    { {0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 };
 
 #ifndef NDEBUG
@@ -511,7 +544,14 @@ void Renderer::createGraphicsPipeline() {
     vk::PipelineShaderStageCreateInfo shaderStages[] {vertShaderCreateInfo,
                                                       fragShaderCreateInfo};
 
-    vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+    auto bindingDescription    = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions    = &bindingDescription,
+        .vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(attributeDescriptions.size()),
+        .pVertexAttributeDescriptions = attributeDescriptions.data()};
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssembly {
         .topology = vk::PrimitiveTopology::eTriangleList};
@@ -595,6 +635,32 @@ void Renderer::createCommandPool() {
     mCommandPool = vk::raii::CommandPool(mDevice, createInfo);
 };
 
+void Renderer::createVertexBuffer() {
+    vk::BufferCreateInfo bufferCreateInfo {
+        .size        = sizeof(vertices[0]) * vertices.size(),
+        .usage       = vk::BufferUsageFlagBits::eVertexBuffer,
+        .sharingMode = vk::SharingMode::eExclusive};
+
+    mVertexBuffer = vk::raii::Buffer(mDevice, bufferCreateInfo);
+
+    vk::MemoryRequirements memoryRequirements =
+        mVertexBuffer.getMemoryRequirements();
+
+    vk::MemoryAllocateInfo memoryAllocateInfo {
+        .allocationSize = memoryRequirements.size,
+        .memoryTypeIndex =
+            findMemoryType(mPhysicalDevice, memoryRequirements.memoryTypeBits,
+                           vk::MemoryPropertyFlagBits::eHostVisible |
+                               vk::MemoryPropertyFlagBits::eHostCoherent)};
+
+    mVertexBufferMemory = vk::raii::DeviceMemory(mDevice, memoryAllocateInfo);
+    mVertexBuffer.bindMemory(*mVertexBufferMemory, 0);
+
+    void *data = mVertexBufferMemory.mapMemory(0, bufferCreateInfo.size);
+    memcpy(data, vertices.data(), bufferCreateInfo.size);
+    mVertexBufferMemory.unmapMemory();
+};
+
 void Renderer::createCommandBuffer() {
     vk::CommandBufferAllocateInfo allocInfo {
         .commandPool        = mCommandPool,
@@ -635,6 +701,9 @@ void Renderer::recordCommandBuffer(uint32_t imageIndex) {
     mCommandBuffer.beginRendering(renderingInfo);
     mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                 mGraphicsPipeline);
+
+    mCommandBuffer.bindVertexBuffers(0, *mVertexBuffer, {0});
+
     mCommandBuffer.setViewport(
         0,
         vk::Viewport(0.0f, 0.0f, static_cast<float>(mSwapChainExtent.width),

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FTL_Vertex.h"
 #include "gtfo_profiler.h"
 #include <core/FTL_Window.h>
 #include <utility/FTL_Log.h>
@@ -40,6 +41,9 @@ class Renderer {
     vk::raii::Semaphore mSemaphoreRenderFinished {nullptr};
     vk::raii::Fence mFenceDraw {nullptr};
 
+    vk::raii::Buffer mVertexBuffer {nullptr};
+    vk::raii::DeviceMemory mVertexBufferMemory {nullptr};
+
     void createInstance(WindowData *pWinData);
     void setupDebugMessenger();
     void createSurface(GLFWwindow *pWindow);
@@ -49,6 +53,7 @@ class Renderer {
     void createImageViews();
     void createGraphicsPipeline();
     void createCommandPool();
+    void createVertexBuffer();
     void createCommandBuffer();
     void createSyncObjects();
 
@@ -76,6 +81,7 @@ class Renderer {
         createImageViews();
         createGraphicsPipeline();
         createCommandPool();
+        createVertexBuffer();
         createCommandBuffer();
         createSyncObjects();
     };
