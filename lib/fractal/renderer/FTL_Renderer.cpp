@@ -1,5 +1,6 @@
 #include "FTL_Renderer.h"
 #include "FTL_Log.h"
+#include "gtfo_profiler.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -247,6 +248,7 @@ void Renderer::setupDebugMessenger() {
 };
 
 void Renderer::createSurface(GLFWwindow *pWindow) {
+    GTFO_PROFILE_FUNCTION();
     VkSurfaceKHR _surface;
     if (glfwCreateWindowSurface(*mInstance, pWindow, nullptr, &_surface) !=
         VK_SUCCESS) {
@@ -260,57 +262,66 @@ void Renderer::createSurface(GLFWwindow *pWindow) {
 };
 
 void Renderer::pickPhysicalDevice() {
+    GTFO_PROFILE_FUNCTION();
     std::vector<vk::raii::PhysicalDevice> devices =
         mInstance.enumeratePhysicalDevices();
 
     if (devices.empty())
         throw std::runtime_error("Failed to find Vulkan Supported GPUs!");
+    {
+        GTFO_PROFILE_SCOPE("Vulkan: Pick Physical Device", "func");
+        bool hasVulkan14Support;
+        bool hasRequiredProperties;
+        bool hasRequiredFeatures;
 
-    bool hasVulkan14Support;
-    bool hasRequiredProperties;
-    bool hasRequiredFeatures;
+        vk::raii::PhysicalDevice device {nullptr};
+        for (uint32_t i = 0; i < devices.size(); i++) {
+            device                = devices[i];
+            auto deviceProperties = device.getProperties();
+            auto deviceFeatures   = device.getFeatures();
+            bool isValidDevice =
+                deviceProperties.apiVersion >= vk::ApiVersion14;
 
-    vk::raii::PhysicalDevice device {nullptr};
-    for (uint32_t i = 0; i < devices.size(); i++) {
-        device                = devices[i];
-        auto deviceProperties = device.getProperties();
-        auto deviceFeatures   = device.getFeatures();
-        bool isValidDevice    = deviceProperties.apiVersion >= vk::ApiVersion14;
+            auto qfps = device.getQueueFamilyProperties();
+            auto graphicsQfpPredicate =
+                [](vk::QueueFamilyProperties const &qfp) {
+                    return (qfp.queueFlags & vk::QueueFlagBits::eGraphics) !=
+                           static_cast<vk::QueueFlags>(0);
+                };
 
-        auto qfps             = device.getQueueFamilyProperties();
-        auto graphicsQfpPredicate = [](vk::QueueFamilyProperties const &qfp) {
-            return (qfp.queueFlags & vk::QueueFlagBits::eGraphics) !=
-                   static_cast<vk::QueueFlags>(0);
-        };
+            const auto qfpIter =
+                std::ranges::find_if(qfps, graphicsQfpPredicate);
+            isValidDevice         = isValidDevice && (qfpIter != qfps.end());
 
-        const auto qfpIter = std::ranges::find_if(qfps, graphicsQfpPredicate);
-        isValidDevice      = isValidDevice && (qfpIter != qfps.end());
+            auto deviceExtensions = device.enumerateDeviceExtensionProperties();
+            for (const char *const &deviceExtension :
+                 RequiredDeviceExtensions) {
+                auto predicate = [deviceExtension](auto const &ext) {
+                    return strcmp(ext.extensionName, deviceExtension) == 0;
+                };
 
-        auto deviceExtensions = device.enumerateDeviceExtensionProperties();
-        for (const char *const &deviceExtension : RequiredDeviceExtensions) {
-            auto predicate = [deviceExtension](auto const &ext) {
-                return strcmp(ext.extensionName, deviceExtension) == 0;
+                auto extIter =
+                    std::ranges::find_if(deviceExtensions, predicate);
+                isValidDevice =
+                    isValidDevice && (extIter != deviceExtensions.end());
             };
 
-            auto extIter = std::ranges::find_if(deviceExtensions, predicate);
-            isValidDevice =
-                isValidDevice && (extIter != deviceExtensions.end());
+            if (!isValidDevice) {
+                continue;
+            }
+
+            FTL_DEBUG("A valid physical device was found!");
+            mPhysicalDevice = device;
+            return;
         };
-
-        if (!isValidDevice) {
-            continue;
-        }
-
-        FTL_DEBUG("A valid physical device was found!");
-        mPhysicalDevice = device;
-        return;
-    };
+    }
 
     FTL_CRITICAL("No valid physical devices were found!");
     throw std::runtime_error("No valid physical devices were found!");
 };
 
 void Renderer::createLogicalDevice() {
+    GTFO_PROFILE_FUNCTION();
     // find the index of the first queue family that supports graphics
     std::vector<vk::QueueFamilyProperties> queueFamilyProperties =
         mPhysicalDevice.getQueueFamilyProperties();
@@ -338,33 +349,35 @@ void Renderer::createLogicalDevice() {
         FTL_DEBUG("Finding Present Queue Index...");
         bool hasGraphicsSupport = true;
         bool hasPresentSupport  = true;
+        {
+            GTFO_PROFILE_SCOPE("Vulkan: Finding Present Queue Index", "func");
+            for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
+                hasGraphicsSupport =
+                    static_cast<bool>(queueFamilyProperties[i].queueFlags &
+                                      vk::QueueFlagBits::eGraphics);
+                hasGraphicsSupport = mPhysicalDevice.getSurfaceSupportKHR(
+                    static_cast<uint32_t>(i), mSurface);
 
-        for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
-            hasGraphicsSupport =
-                static_cast<bool>(queueFamilyProperties[i].queueFlags &
-                                  vk::QueueFlagBits::eGraphics);
-            hasGraphicsSupport = mPhysicalDevice.getSurfaceSupportKHR(
-                static_cast<uint32_t>(i), mSurface);
+                if (hasGraphicsSupport && hasPresentSupport) {
+                    graphicsIndex       = static_cast<uint32_t>(i);
+                    mGraphicsQueueIndex = graphicsIndex;
 
-            if (hasGraphicsSupport && hasPresentSupport) {
-                graphicsIndex       = static_cast<uint32_t>(i);
-                mGraphicsQueueIndex = graphicsIndex;
-
-                presentIndex        = graphicsIndex;
-                mPresentQueueIndex  = presentIndex;
-                FTL_DEBUG("Graphics Queue and Present Queue have the same "
-                          "indicies: {}, {}  respectively",
-                          graphicsIndex, presentIndex);
-                break;
-            } else if (!hasGraphicsSupport && hasPresentSupport) {
-                presentIndex       = static_cast<uint32_t>(i);
-                mPresentQueueIndex = presentIndex;
-                FTL_DEBUG("Graphics Queue and Present Queue have different "
-                          "indicies: {}, {}  respectively",
-                          graphicsIndex, presentIndex);
-                break;
-            }
-        };
+                    presentIndex        = graphicsIndex;
+                    mPresentQueueIndex  = presentIndex;
+                    FTL_DEBUG("Graphics Queue and Present Queue have the same "
+                              "indicies: {}, {}  respectively",
+                              graphicsIndex, presentIndex);
+                    break;
+                } else if (!hasGraphicsSupport && hasPresentSupport) {
+                    presentIndex       = static_cast<uint32_t>(i);
+                    mPresentQueueIndex = presentIndex;
+                    FTL_DEBUG("Graphics Queue and Present Queue have different "
+                              "indicies: {}, {}  respectively",
+                              graphicsIndex, presentIndex);
+                    break;
+                }
+            };
+        }
 
         if (graphicsIndex == queueFamilyProperties.size() ||
             presentIndex == queueFamilyProperties.size()) {
@@ -417,6 +430,7 @@ void Renderer::createLogicalDevice() {
 };
 
 void Renderer::createSwapChain(GLFWwindow *pWindow) {
+    GTFO_PROFILE_FUNCTION();
     vk::SurfaceCapabilitiesKHR surfaceCapabilites =
         mPhysicalDevice.getSurfaceCapabilitiesKHR(mSurface);
 
@@ -455,8 +469,9 @@ void Renderer::createSwapChain(GLFWwindow *pWindow) {
 };
 
 void Renderer::createImageViews() {
-    mSwapChainImageViews.clear();
+    GTFO_PROFILE_FUNCTION();
 
+    mSwapChainImageViews.clear();
     vk::ImageViewCreateInfo createInfo {
         .viewType         = vk::ImageViewType::e2D,
         .format           = mSwapChainFormat,
@@ -472,6 +487,7 @@ void Renderer::createImageViews() {
 };
 
 void Renderer::createGraphicsPipeline() {
+    GTFO_PROFILE_FUNCTION();
     std::string shaderPath       = std::string(std::filesystem::current_path());
     shaderPath                   = shaderPath + "/assets/shaders/slang.spv";
 
@@ -653,6 +669,7 @@ void Renderer::createSyncObjects() {
 };
 
 void Renderer::render() {
+    GTFO_PROFILE_FUNCTION();
     auto [result, imageIndex] = mSwapChain.acquireNextImage(
         UINT64_MAX, *mSemaphorePresentComplete, nullptr);
 
@@ -694,6 +711,7 @@ void Renderer::transitionImageLayout(uint32_t imageIndex,
                                      vk::AccessFlags2 dstAccessMask,
                                      vk::PipelineStageFlags2 srcStageMask,
                                      vk::PipelineStageFlags2 dstStageMask) {
+    GTFO_PROFILE_FUNCTION();
     vk::ImageMemoryBarrier2 barrier = {
         .srcStageMask        = srcStageMask,
         .srcAccessMask       = srcAccessMask,

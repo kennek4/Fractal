@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gtfo_profiler.h"
 #include <core/FTL_Window.h>
 #include <utility/FTL_Log.h>
 #include <utility/FTL_pch.h>
@@ -65,6 +66,7 @@ class Renderer {
 
     void shutdown(GLFWwindow **ppWindow);
     void init(WindowData *pWinData) {
+        GTFO_PROFILE_SCOPE("Vulkan Init", "init");
         createInstance(pWinData);
         setupDebugMessenger();
         createSurface(pWinData->window);
