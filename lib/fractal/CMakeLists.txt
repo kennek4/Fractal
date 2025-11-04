@@ -11,7 +11,29 @@ target_compile_definitions(VulkanCppModule
     INTERFACE VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
 )
 
-set_target_properties(VulkanCppModule PROPERTIES CXX_STANDARD 23)
+set_target_properties(VulkanCppModule PROPERTIES CXX_STANDARD 20)
+
+function (add_slang_shader_target TARGET)
+  cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
+    set (SHADERS_DIR ${FRACTAL_ROOT}/assets/shaders)
+  set (ENTRY_POINTS -entry vertMain -entry fragMain)
+  add_custom_command (
+          OUTPUT ${SHADERS_DIR}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
+  )
+  add_custom_command (
+          OUTPUT  ${SHADERS_DIR}/slang.spv
+          COMMAND slangc ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o slang.spv
+          WORKING_DIRECTORY ${SHADERS_DIR}
+          DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
+          COMMENT "Compiling Slang Shaders"
+          VERBATIM
+  )
+  add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/slang.spv)
+endfunction()
+
+add_slang_shader_target(FRACTAL_SHADERS SOURCES ${FRACTAL_ROOT}/assets/shaders/shader.slang)
+
 
 add_library(FractalLib STATIC)
 target_sources(FractalLib 
@@ -45,6 +67,7 @@ target_sources(FractalLib
 )
 
 target_precompile_headers(FractalLib PRIVATE utility/FTL_pch.h)
+add_dependencies(FractalLib FRACTAL_SHADERS)
 
 message(STATUS "[Fractal]: Using DEBUG Libraries!")
 target_link_libraries(FractalLib VulkanCppModule glfw GTFOProfiler spdlog::spdlog)

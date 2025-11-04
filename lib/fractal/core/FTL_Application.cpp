@@ -1,5 +1,4 @@
 #include "FTL_Application.h"
-#include "gtfo_profiler.h"
 #include <utility/FTL_Log.h>
 
 namespace FTL {
@@ -13,15 +12,16 @@ Application::~Application() { mRenderer->shutdown(&mWindowData.window); };
 void Application::init() {
     Log::init();
 
-    {
-        FTL_CORE_DEBUG("Creating vkInstance...");
-        mRenderer->createInstance(&mWindowData);
-    }
+    FTL_DEBUG("Calling Renderer::createInstance()...");
+    mRenderer->init(&mWindowData);
 };
 
 void Application::run() {
     while (!glfwWindowShouldClose(mWindowData.window)) {
         glfwPollEvents();
+        mRenderer->render();
     }
+
+    mRenderer->waitIdle();
 };
 }; // namespace FTL
