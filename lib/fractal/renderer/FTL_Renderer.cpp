@@ -2,6 +2,7 @@
 #include "FTL_Log.h"
 #include "FTL_Vertex.h"
 #include "vulkan/vulkan.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -117,6 +118,31 @@ uint32_t findMemoryType(const vk::raii::PhysicalDevice &physicalDevice,
     FTL_CRITICAL(
         "Failed to find valid memory type for vertex buffer allocation!");
     throw std::runtime_error("Failed to find valid memory type!");
+};
+
+void createBuffer(const vk::raii::PhysicalDevice &physicalDevice,
+                  const vk::raii::Device &device, vk::raii::Buffer &buffer,
+                  vk::raii::DeviceMemory &bufferMemory, vk::DeviceSize size,
+                  vk::BufferUsageFlags usageFlags,
+                  vk::MemoryPropertyFlags memPropFlags) {
+
+    vk::BufferCreateInfo createInfo {.size  = size,
+                                     .usage = usageFlags,
+                                     .sharingMode =
+                                         vk::SharingMode::eExclusive};
+
+    buffer = vk::raii::Buffer(device, createInfo);
+    vk::MemoryRequirements memoryRequirements = buffer.getMemoryRequirements();
+
+    vk::MemoryAllocateInfo memoryAllocateInfo {
+        .allocationSize  = memoryRequirements.size,
+        .memoryTypeIndex = findMemoryType(
+            physicalDevice, memoryRequirements.memoryTypeBits, memPropFlags)
+
+    };
+
+    bufferMemory = vk::raii::DeviceMemory(device, memoryAllocateInfo);
+    buffer.bindMemory(*bufferMemory, 0);
 };
 
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL vkDebugCallback(
@@ -636,29 +662,46 @@ void Renderer::createCommandPool() {
 };
 
 void Renderer::createVertexBuffer() {
-    vk::BufferCreateInfo bufferCreateInfo {
-        .size        = sizeof(vertices[0]) * vertices.size(),
-        .usage       = vk::BufferUsageFlagBits::eVertexBuffer,
-        .sharingMode = vk::SharingMode::eExclusive};
+    vk::DeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
-    mVertexBuffer = vk::raii::Buffer(mDevice, bufferCreateInfo);
+    vk::raii::Buffer bufferStaging {nullptr};
+    vk::raii::DeviceMemory memStaging {nullptr};
 
-    vk::MemoryRequirements memoryRequirements =
-        mVertexBuffer.getMemoryRequirements();
+    createBuffer(mPhysicalDevice, mDevice, bufferStaging, memStaging,
+                 bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+                 vk::MemoryPropertyFlagBits::eHostVisible |
+                     vk::MemoryPropertyFlagBits::eHostCoherent);
 
-    vk::MemoryAllocateInfo memoryAllocateInfo {
-        .allocationSize = memoryRequirements.size,
-        .memoryTypeIndex =
-            findMemoryType(mPhysicalDevice, memoryRequirements.memoryTypeBits,
-                           vk::MemoryPropertyFlagBits::eHostVisible |
-                               vk::MemoryPropertyFlagBits::eHostCoherent)};
+    bufferStaging.bindMemory(memStaging, 0);
+    void *dataStaging = memStaging.mapMemory(0, bufferSize);
+    memcpy(dataStaging, vertices.data(), static_cast<size_t>(bufferSize));
+    memStaging.unmapMemory();
 
-    mVertexBufferMemory = vk::raii::DeviceMemory(mDevice, memoryAllocateInfo);
-    mVertexBuffer.bindMemory(*mVertexBufferMemory, 0);
+    createBuffer(mPhysicalDevice, mDevice, mVertexBuffer, mVertexBufferMemory,
+                 bufferSize,
+                 vk::BufferUsageFlagBits::eVertexBuffer |
+                     vk::BufferUsageFlagBits::eTransferDst,
+                 vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-    void *data = mVertexBufferMemory.mapMemory(0, bufferCreateInfo.size);
-    memcpy(data, vertices.data(), bufferCreateInfo.size);
-    mVertexBufferMemory.unmapMemory();
+    // Copy from staging buffer to vertex buffer
+    vk::CommandBufferAllocateInfo tempCmdBufferAllocInfo {
+        .commandPool        = mCommandPool,
+        .level              = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = 1};
+
+    vk::raii::CommandBuffer _commandBuffer = std::move(
+        mDevice.allocateCommandBuffers(tempCmdBufferAllocInfo).front());
+
+    _commandBuffer.begin(vk::CommandBufferBeginInfo {
+        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+    _commandBuffer.copyBuffer(bufferStaging, mVertexBuffer,
+                              vk::BufferCopy(0, 0, bufferSize));
+    _commandBuffer.end();
+
+    mGraphicsQueue.submit(vk::SubmitInfo {.commandBufferCount = 1,
+                                          .pCommandBuffers = &*_commandBuffer},
+                          nullptr);
+    mGraphicsQueue.waitIdle();
 };
 
 void Renderer::createCommandBuffer() {
