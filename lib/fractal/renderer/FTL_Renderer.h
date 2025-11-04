@@ -16,8 +16,12 @@ class Renderer {
     vk::raii::SurfaceKHR mSurface {nullptr};
     vk::raii::PhysicalDevice mPhysicalDevice {nullptr};
     vk::raii::Device mDevice {nullptr};
+
     vk::raii::Queue mGraphicsQueue {nullptr};
+    uint32_t mGraphicsQueueIndex;
+
     vk::raii::Queue mPresentQueue {nullptr};
+    uint32_t mPresentQueueIndex;
 
     vk::raii::SwapchainKHR mSwapChain {nullptr};
     vk::Format mSwapChainFormat {vk::Format::eUndefined};
@@ -27,6 +31,33 @@ class Renderer {
 
     vk::raii::PipelineLayout mPipelineLayout {nullptr};
     vk::raii::Pipeline mGraphicsPipeline {nullptr};
+
+    vk::raii::CommandPool mCommandPool {nullptr};
+    vk::raii::CommandBuffer mCommandBuffer {nullptr};
+
+    vk::raii::Semaphore mSemaphorePresentComplete {nullptr};
+    vk::raii::Semaphore mSemaphoreRenderFinished {nullptr};
+    vk::raii::Fence mFenceDraw {nullptr};
+
+    void createInstance(WindowData *pWinData);
+    void setupDebugMessenger();
+    void createSurface(GLFWwindow *pWindow);
+    void pickPhysicalDevice();
+    void createLogicalDevice();
+    void createSwapChain(GLFWwindow *pWindow);
+    void createImageViews();
+    void createGraphicsPipeline();
+    void createCommandPool();
+    void createCommandBuffer();
+    void createSyncObjects();
+
+    void recordCommandBuffer(uint32_t imageIndex);
+    void transitionImageLayout(uint32_t imageIndex, vk::ImageLayout oldLayout,
+                               vk::ImageLayout newLayout,
+                               vk::AccessFlags2 srcAccessMask,
+                               vk::AccessFlags2 dstAccessMask,
+                               vk::PipelineStageFlags2 srcStageMask,
+                               vk::PipelineStageFlags2 dstStageMask);
 
   public:
     Renderer();
@@ -42,15 +73,12 @@ class Renderer {
         createSwapChain(pWinData->window);
         createImageViews();
         createGraphicsPipeline();
+        createCommandPool();
+        createCommandBuffer();
+        createSyncObjects();
     };
 
-    void createInstance(WindowData *pWinData);
-    void setupDebugMessenger();
-    void createSurface(GLFWwindow *pWindow);
-    void pickPhysicalDevice();
-    void createLogicalDevice();
-    void createSwapChain(GLFWwindow *pWindow);
-    void createImageViews();
-    void createGraphicsPipeline();
+    void render();
+    void waitIdle() const { mDevice.waitIdle(); };
 };
 }; // namespace FTL

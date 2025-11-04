@@ -19,6 +19,9 @@ void Application::init() {
 void Application::run() {
     while (!glfwWindowShouldClose(mWindowData.window)) {
         glfwPollEvents();
+        mRenderer->render();
     }
+
+    mRenderer->waitIdle();
 };
 }; // namespace FTL

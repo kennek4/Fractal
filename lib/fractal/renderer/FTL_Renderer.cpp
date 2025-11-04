@@ -1,8 +1,5 @@
 #include "FTL_Renderer.h"
 #include "FTL_Log.h"
-#include "vulkan/vulkan.hpp"
-#include <cstdint>
-#include <vulkan/vulkan_core.h>
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -118,9 +115,11 @@ const std::vector<const char *> ValidationLayers {
     "VK_LAYER_KHRONOS_validation"};
 
 const std::vector<const char *> RequiredDeviceExtensions {
-    vk::KHRSwapchainExtensionName, vk::KHRSpirv14ExtensionName,
+    vk::KHRSwapchainExtensionName,
+    vk::KHRSpirv14ExtensionName,
     vk::KHRSynchronization2ExtensionName,
-    vk::KHRCreateRenderpass2ExtensionName};
+    vk::KHRCreateRenderpass2ExtensionName,
+};
 
 #ifndef NDEBUG
 constexpr bool hasValidationLayerSupport = true;
@@ -327,11 +326,13 @@ void Renderer::createLogicalDevice() {
 
     uint32_t graphicsIndex = static_cast<uint32_t>(std::distance(
         queueFamilyProperties.begin(), graphicsQueueFamilyProperty));
+    mGraphicsQueueIndex    = graphicsIndex;
 
     uint32_t presentIndex =
         mPhysicalDevice.getSurfaceSupportKHR(graphicsIndex, mSurface)
             ? graphicsIndex
             : static_cast<uint32_t>(queueFamilyProperties.size());
+    mPresentQueueIndex = presentIndex;
 
     if (presentIndex == queueFamilyProperties.size()) {
         FTL_DEBUG("Finding Present Queue Index...");
@@ -346,14 +347,18 @@ void Renderer::createLogicalDevice() {
                 static_cast<uint32_t>(i), mSurface);
 
             if (hasGraphicsSupport && hasPresentSupport) {
-                graphicsIndex = static_cast<uint32_t>(i);
-                presentIndex  = graphicsIndex;
+                graphicsIndex       = static_cast<uint32_t>(i);
+                mGraphicsQueueIndex = graphicsIndex;
+
+                presentIndex        = graphicsIndex;
+                mPresentQueueIndex  = presentIndex;
                 FTL_DEBUG("Graphics Queue and Present Queue have the same "
                           "indicies: {}, {}  respectively",
                           graphicsIndex, presentIndex);
                 break;
             } else if (!hasGraphicsSupport && hasPresentSupport) {
-                presentIndex = static_cast<uint32_t>(i);
+                presentIndex       = static_cast<uint32_t>(i);
+                mPresentQueueIndex = presentIndex;
                 FTL_DEBUG("Graphics Queue and Present Queue have different "
                           "indicies: {}, {}  respectively",
                           graphicsIndex, presentIndex);
@@ -371,15 +376,20 @@ void Renderer::createLogicalDevice() {
     };
 
     vk::StructureChain<vk::PhysicalDeviceFeatures2,
+                       vk::PhysicalDeviceVulkan11Features,
                        vk::PhysicalDeviceVulkan13Features,
-                       vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>
+                       vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+                       vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT>
         featureChain {
             {}, // vk::PhysicalDeviceFeatures2 (empty for now)
-            {.dynamicRendering =
-                 true}, // Enable dynamic rendering from Vulkan 1.3
+            {.shaderDrawParameters = VK_TRUE},
+            {.synchronization2 = VK_TRUE,
+             .dynamicRendering =
+                 VK_TRUE}, // Enable dynamic rendering from Vulkan 1.3
             {.extendedDynamicState =
-                 true} // Enable extended dynamic state from the extension
-        };
+                 VK_TRUE}, // Enable extended dynamic state from the extension
+            {.swapchainMaintenance1 = VK_TRUE},
+    };
 
     float queuePriority = 0.0f;
     vk::DeviceQueueCreateInfo deviceQueueCreateInfo {
@@ -560,6 +570,151 @@ void Renderer::createGraphicsPipeline() {
 
     FTL_DEBUG("Vulkan Graphics Pipeline Successfully Created!");
 };
+
+void Renderer::createCommandPool() {
+    vk::CommandPoolCreateInfo createInfo {
+        .flags            = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+        .queueFamilyIndex = mGraphicsQueueIndex};
+
+    mCommandPool = vk::raii::CommandPool(mDevice, createInfo);
+};
+
+void Renderer::createCommandBuffer() {
+    vk::CommandBufferAllocateInfo allocInfo {
+        .commandPool        = mCommandPool,
+        .level              = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = 1};
+
+    mCommandBuffer =
+        std::move(vk::raii::CommandBuffers(mDevice, allocInfo).front());
+};
+
+void Renderer::recordCommandBuffer(uint32_t imageIndex) {
+    mCommandBuffer.begin({});
+
+    transitionImageLayout(
+        imageIndex, vk::ImageLayout::eUndefined,
+        vk::ImageLayout::eColorAttachmentOptimal,
+        {}, // srcAccessMask (no need to wait for previous operations)
+        vk::AccessFlagBits2::eColorAttachmentWrite,        // dstAccessMask
+        vk::PipelineStageFlagBits2::eTopOfPipe,            // srcStage
+        vk::PipelineStageFlagBits2::eColorAttachmentOutput // dstStage
+    );
+
+    vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
+    vk::RenderingAttachmentInfo attachmentInfo {
+        .imageView   = mSwapChainImageViews[imageIndex],
+        .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp      = vk::AttachmentLoadOp::eClear,
+        .storeOp     = vk::AttachmentStoreOp::eStore,
+        .clearValue  = clearColor};
+
+    vk::RenderingInfo renderingInfo {
+        .renderArea           = {.offset = {0, 0}, .extent = mSwapChainExtent},
+        .layerCount           = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments    = &attachmentInfo
+    };
+
+    mCommandBuffer.beginRendering(renderingInfo);
+    mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                                mGraphicsPipeline);
+    mCommandBuffer.setViewport(
+        0,
+        vk::Viewport(0.0f, 0.0f, static_cast<float>(mSwapChainExtent.width),
+                     static_cast<float>(mSwapChainExtent.height), 0.0f, 1.0f));
+
+    mCommandBuffer.setScissor(0,
+                              vk::Rect2D(vk::Offset2D(0, 0), mSwapChainExtent));
+    mCommandBuffer.draw(3, 1, 0, 0);
+    mCommandBuffer.endRendering();
+
+    transitionImageLayout(
+        imageIndex, vk::ImageLayout::eColorAttachmentOptimal,
+        vk::ImageLayout::ePresentSrcKHR,
+        vk::AccessFlagBits2::eColorAttachmentWrite,         // srcAccessMask
+        {},                                                 // dstAccessMask
+        vk::PipelineStageFlagBits2::eColorAttachmentOutput, // srcStage
+        vk::PipelineStageFlagBits2::eBottomOfPipe           // dstStage
+    );
+
+    mCommandBuffer.end();
+};
+
+void Renderer::createSyncObjects() {
+    mSemaphorePresentComplete =
+        vk::raii::Semaphore(mDevice, vk::SemaphoreCreateInfo());
+
+    mSemaphoreRenderFinished =
+        vk::raii::Semaphore(mDevice, vk::SemaphoreCreateInfo());
+
+    mFenceDraw =
+        vk::raii::Fence(mDevice, {.flags = vk::FenceCreateFlagBits::eSignaled});
+};
+
+void Renderer::render() {
+    auto [result, imageIndex] = mSwapChain.acquireNextImage(
+        UINT64_MAX, *mSemaphorePresentComplete, nullptr);
+
+    recordCommandBuffer(imageIndex);
+
+    mDevice.resetFences(*mFenceDraw);
+
+    vk::PipelineStageFlags waitDestinationStageMask(
+        vk::PipelineStageFlagBits::eColorAttachmentOutput);
+
+    const vk::SubmitInfo submitInfo {
+        .waitSemaphoreCount   = 1,
+        .pWaitSemaphores      = &*mSemaphorePresentComplete,
+        .pWaitDstStageMask    = &waitDestinationStageMask,
+        .commandBufferCount   = 1,
+        .pCommandBuffers      = &*mCommandBuffer,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores    = &*mSemaphoreRenderFinished};
+
+    mGraphicsQueue.submit(submitInfo, *mFenceDraw);
+    while (vk::Result::eTimeout ==
+           mDevice.waitForFences(*mFenceDraw, vk::True, UINT64_MAX))
+        ;
+
+    const vk::PresentInfoKHR presentInfoKHR {.waitSemaphoreCount = 1,
+                                             .pWaitSemaphores =
+                                                 &*mSemaphoreRenderFinished,
+                                             .swapchainCount = 1,
+                                             .pSwapchains    = &*mSwapChain,
+                                             .pImageIndices  = &imageIndex};
+
+    result = mGraphicsQueue.presentKHR(presentInfoKHR);
+};
+
+void Renderer::transitionImageLayout(uint32_t imageIndex,
+                                     vk::ImageLayout oldLayout,
+                                     vk::ImageLayout newLayout,
+                                     vk::AccessFlags2 srcAccessMask,
+                                     vk::AccessFlags2 dstAccessMask,
+                                     vk::PipelineStageFlags2 srcStageMask,
+                                     vk::PipelineStageFlags2 dstStageMask) {
+    vk::ImageMemoryBarrier2 barrier = {
+        .srcStageMask        = srcStageMask,
+        .srcAccessMask       = srcAccessMask,
+        .dstStageMask        = dstStageMask,
+        .dstAccessMask       = dstAccessMask,
+        .oldLayout           = oldLayout,
+        .newLayout           = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = mSwapChainImages[imageIndex],
+        .subresourceRange    = {.aspectMask     = vk::ImageAspectFlagBits::eColor,
+                                .baseMipLevel   = 0,
+                                .levelCount     = 1,
+                                .baseArrayLayer = 0,
+                                .layerCount     = 1}
+    };
+    vk::DependencyInfo dependencyInfo = {.dependencyFlags         = {},
+                                         .imageMemoryBarrierCount = 1,
+                                         .pImageMemoryBarriers    = &barrier};
+    mCommandBuffer.pipelineBarrier2(dependencyInfo);
+}
 
 void Renderer::shutdown(GLFWwindow **ppWindow) {
     glfwDestroyWindow(*ppWindow);
